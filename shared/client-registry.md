@@ -4,9 +4,9 @@ Active clients, configurations, and pipeline status.
 
 ## Active Clients
 
-| Slug                | Name               | Vertical  | Domain                        | GA4 ID       | Status | Start Date |
-|---------------------|--------------------|-----------|-------------------------------|--------------|--------|------------|
-| pixelpro-analytics  | PixelPro Analytics | ecommerce | pixelpro-analytics.vercel.app | G-XXXXXXXXXX | active | 2026-03-14 |
+| Slug               | Name               | Vertical  | Domain                        | GA4 ID       | Status | Start Date | Supabase Project     |
+|--------------------|--------------------|-----------|-------------------------------|--------------|--------|------------|----------------------|
+| pixelpro-analytics | PixelPro Analytics | ecommerce | pixelpro-analytics.vercel.app | G-XXXXXXXXXX | active | 2026-03-14 | hsjwzdgagfbfmqkjsvkw |
 
 ---
 

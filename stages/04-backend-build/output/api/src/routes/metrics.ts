@@ -35,7 +35,14 @@ router.get('/', authenticate, authorizeClient, async (req: AuthenticatedRequest,
     return
   }
 
-  res.json({ data, meta: { request_id: req.requestId, timestamp: new Date().toISOString() } })
+  const normalized = (data ?? []).map(row => ({
+    client_id: row.client_id,
+    date: row.date,
+    metric_name: row.metric_name,
+    value: Number(row.metric_value),
+  }))
+
+  res.json({ data: normalized, meta: { request_id: req.requestId, timestamp: new Date().toISOString() } })
 })
 
 export default router

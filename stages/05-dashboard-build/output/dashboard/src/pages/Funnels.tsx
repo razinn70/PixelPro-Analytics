@@ -1,22 +1,38 @@
-import FunnelChart from '@/components/FunnelChart'
 import { useFunnel } from '@/hooks/useFunnel'
-import type { DateRange } from '@/types'
+import FunnelChart from '@/components/FunnelChart'
 
-interface Props { dateRange: DateRange }
+// The purchase funnel ID is read from env; falls back to a stable default.
+const FUNNEL_ID = (import.meta.env.VITE_FUNNEL_ID as string | undefined) ?? '1'
 
-export default function Funnels({ dateRange }: Props) {
-  const { steps, loading, error } = useFunnel(dateRange)
+export default function Funnels() {
+  const { funnel, loading, error } = useFunnel(FUNNEL_ID)
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-text-primary">Purchase Funnel</h1>
+      <h1 className="text-2xl font-bold text-text-primary">
+        {funnel ? funnel.name : 'Purchase Funnel'}
+      </h1>
 
-      {error && <p className="text-danger text-sm">{error}</p>}
-      {loading && <p className="text-text-secondary">Loading…</p>}
+      {/* Error */}
+      {error && (
+        <div className="bg-danger/10 border border-danger/30 rounded-lg px-4 py-3 text-danger text-sm">
+          {error}
+        </div>
+      )}
 
-      {!loading && steps.length > 0 && (
+      {/* Loading skeleton */}
+      {loading && (
+        <div className="space-y-3">
+          {Array.from({ length: 5 }, (_, i) => (
+            <div key={i} className="bg-surface rounded-xl p-4 border border-border animate-pulse h-14" />
+          ))}
+        </div>
+      )}
+
+      {/* Chart + table */}
+      {!loading && funnel && funnel.steps.length > 0 && (
         <>
-          <FunnelChart steps={steps} />
+          <FunnelChart steps={funnel.steps} />
 
           {/* Step detail table */}
           <div className="bg-surface rounded-xl border border-border overflow-hidden">
@@ -24,39 +40,42 @@ export default function Funnels({ dateRange }: Props) {
               <thead>
                 <tr className="border-b border-border">
                   <th className="text-left px-5 py-3 text-text-secondary font-medium">#</th>
-                  <th className="text-left px-5 py-3 text-text-secondary font-medium">Step</th>
-                  <th className="text-right px-5 py-3 text-text-secondary font-medium">Sessions</th>
-                  <th className="text-right px-5 py-3 text-text-secondary font-medium">Step Conversion</th>
-                  <th className="text-right px-5 py-3 text-text-secondary font-medium">Drop-off</th>
-                  <th className="text-right px-5 py-3 text-text-secondary font-medium">Cumulative</th>
+                  <th className="text-left px-5 py-3 text-text-secondary font-medium">Step Name</th>
+                  <th className="text-right px-5 py-3 text-text-secondary font-medium">Visitors</th>
+                  <th className="text-right px-5 py-3 text-text-secondary font-medium">Conversion Rate</th>
                 </tr>
               </thead>
               <tbody>
-                {steps.map((step, idx) => {
-                  const cumulative = steps[0].sessions > 0
-                    ? (step.sessions / steps[0].sessions) * 100
-                    : 0
-                  return (
-                    <tr key={step.step_index} className="border-b border-border last:border-0">
-                      <td className="px-5 py-3 text-muted">{idx + 1}</td>
-                      <td className="px-5 py-3 text-text-primary">{step.name}</td>
-                      <td className="px-5 py-3 text-right text-text-primary">{step.sessions.toLocaleString()}</td>
-                      <td className="px-5 py-3 text-right text-success">
-                        {idx === 0 ? '—' : `${step.conversion_rate.toFixed(1)}%`}
-                      </td>
-                      <td className="px-5 py-3 text-right text-danger">
-                        {idx === 0 ? '—' : `${step.drop_off_rate.toFixed(1)}%`}
-                      </td>
-                      <td className="px-5 py-3 text-right text-primary font-medium">
-                        {cumulative.toFixed(1)}%
-                      </td>
-                    </tr>
-                  )
-                })}
+                {funnel.steps.map(step => (
+                  <tr
+                    key={step.step_number}
+                    className="border-b border-border last:border-0 hover:bg-dark/40 transition-colors"
+                  >
+                    <td className="px-5 py-3 text-muted">{step.step_number}</td>
+                    <td className="px-5 py-3 text-text-primary">{step.step_name}</td>
+                    <td className="px-5 py-3 text-right text-text-primary">
+                      {step.count.toLocaleString('en-CA')}
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      {step.step_number === 1 ? (
+                        <span className="text-muted">—</span>
+                      ) : (
+                        <span className="text-success font-medium">
+                          {step.conversion_rate.toFixed(1)}%
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         </>
+      )}
+
+      {/* Empty state */}
+      {!loading && !error && funnel && funnel.steps.length === 0 && (
+        <p className="text-text-secondary text-sm">No funnel steps found.</p>
       )}
     </div>
   )

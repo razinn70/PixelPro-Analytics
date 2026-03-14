@@ -20,3 +20,13 @@ jobs:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           HEARTBEAT_URL:        ${{ secrets.ETL_HEARTBEAT_URL }}
+      - name: Run funnel computation pipeline
+        run: python stages/04-backend-build/output/etl/pipelines/funnel_compute.py
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      - name: Run cohort analysis pipeline
+        run: python stages/04-backend-build/output/etl/pipelines/cohort_analysis.py
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}

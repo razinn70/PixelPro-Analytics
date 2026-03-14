@@ -7,6 +7,21 @@ import type { AuthenticatedRequest } from '@/types'
 
 const router = Router()
 
+function normalizeReport(report: {
+  id: string
+  client_id: string
+  generated_at: string
+  data?: { status?: string; pdf_path?: string }
+}) {
+  return {
+    id: report.id,
+    client_id: report.client_id,
+    status: report.data?.status === 'generated' ? 'complete' : (report.data?.status ?? 'pending'),
+    report_url: report.data?.pdf_path,
+    created_at: report.generated_at,
+  }
+}
+
 // GET /api/v1/reports?client_id=&type=
 router.get('/', authenticate, authorizeClient, async (req: AuthenticatedRequest, res) => {
   const clientId   = req.query.client_id as string
@@ -22,7 +37,10 @@ router.get('/', authenticate, authorizeClient, async (req: AuthenticatedRequest,
     return
   }
 
-  res.json({ data, meta: { request_id: req.requestId, timestamp: new Date().toISOString() } })
+  res.json({
+    data: (data ?? []).map(normalizeReport),
+    meta: { request_id: req.requestId, timestamp: new Date().toISOString() },
+  })
 })
 
 const generateSchema = z.object({
@@ -58,7 +76,10 @@ router.post('/generate', authenticate, authorizeClient, reportLimiter, async (re
     return
   }
 
-  res.status(202).json({ data, meta: { request_id: req.requestId, timestamp: new Date().toISOString() } })
+  res.status(202).json({
+    data: normalizeReport(data),
+    meta: { request_id: req.requestId, timestamp: new Date().toISOString() },
+  })
 })
 
 export default router

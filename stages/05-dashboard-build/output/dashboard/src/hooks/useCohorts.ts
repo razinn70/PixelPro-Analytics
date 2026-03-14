@@ -1,30 +1,37 @@
 import { useState, useEffect } from 'react'
 import { fetchCohorts } from '@/lib/api'
-import type { DateRange, CohortRow } from '@/types'
+import type { CohortRow } from '@/types'
 
 interface CohortState {
-  rows:    CohortRow[]
+  cohorts: CohortRow[]
   loading: boolean
-  error:   string | null
+  error: string | null
 }
 
-export function useCohorts(dateRange: DateRange): CohortState {
-  const [state, setState] = useState<CohortState>({ rows: [], loading: true, error: null })
+export function useCohorts(clientId: string): CohortState {
+  const [state, setState] = useState<CohortState>({
+    cohorts: [],
+    loading: true,
+    error:   null,
+  })
 
   useEffect(() => {
     let cancelled = false
+
     setState(s => ({ ...s, loading: true, error: null }))
 
-    fetchCohorts(dateRange)
-      .then(rows => {
-        if (!cancelled) setState({ rows, loading: false, error: null })
+    fetchCohorts(clientId)
+      .then(cohorts => {
+        if (cancelled) return
+        setState({ cohorts, loading: false, error: null })
       })
       .catch(err => {
-        if (!cancelled) setState(s => ({ ...s, loading: false, error: (err as Error).message }))
+        if (cancelled) return
+        setState({ cohorts: [], loading: false, error: (err as Error).message })
       })
 
     return () => { cancelled = true }
-  }, [dateRange.from, dateRange.to])
+  }, [clientId])
 
   return state
 }

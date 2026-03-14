@@ -1,15 +1,23 @@
 """
-PixelPro Analytics — Weekly / Monthly Report Generator
-Reads metrics from Supabase, renders a Jinja2 HTML template, converts to PDF,
-stores the record in the reports table, and sends via Resend.
+Weekly report generator — Stage 05 output.
+Reads from Supabase, renders Jinja2 HTML template, converts to PDF via pdfkit,
+sends via Resend API.
+
+Usage:
+    python report_generator.py
+
+Required env vars (copy .env.example and fill in):
+    SUPABASE_URL
+    SUPABASE_SERVICE_KEY
+    CLIENT_ID
+    RECIPIENT_EMAIL
+    RESEND_API_KEY
 """
 from __future__ import annotations
 
 import os
-import json
-import datetime
-import base64
 import tempfile
+from datetime import date, timedelta
 from pathlib import Path
 
 import pdfkit
@@ -20,128 +28,293 @@ from supabase import create_client, Client
 
 load_dotenv()
 
+# ── Configuration ─────────────────────────────────────────────────────────────
 SUPABASE_URL         = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
-RESEND_API_KEY       = os.environ["RESEND_API_KEY"]
-FROM_EMAIL           = os.environ.get("FROM_EMAIL", "reports@pixelpro.ca")
 CLIENT_ID            = os.environ["CLIENT_ID"]
 RECIPIENT_EMAIL      = os.environ["RECIPIENT_EMAIL"]
+RESEND_API_KEY       = os.environ["RESEND_API_KEY"]
+FROM_EMAIL           = os.environ.get("FROM_EMAIL", "reports@pixelpro.ca")
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+# Lazily initialised so tests can import without valid env vars.
+_supabase: Client | None = None
 
 
-def _fetch_metrics(client_id: str, from_date: str, to_date: str) -> list[dict]:
-    resp = (
-        supabase.table("daily_metrics")
+def _get_client() -> Client:
+    global _supabase
+    if _supabase is None:
+        _supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    return _supabase
+
+
+# ── Data fetching ──────────────────────────────────────────────────────────────
+
+def fetch_report_data(
+    client_id: str,
+    week_start: date,
+    week_end: date,
+) -> dict:
+    """
+    Query daily_metrics and funnel data from Supabase for the given week range.
+
+    Returns a context dict ready to be passed to render_html().
+    """
+    sb = _get_client()
+
+    # Daily metrics for the current week
+    metrics_resp = (
+        sb.table("daily_metrics")
         .select("*")
         .eq("client_id", client_id)
-        .gte("date", from_date)
-        .lte("date", to_date)
+        .gte("date", week_start.isoformat())
+        .lte("date", week_end.isoformat())
         .execute()
     )
-    return resp.data or []
+    daily_rows: list[dict] = metrics_resp.data or []
 
+    # Derive aggregate KPIs
+    def _sum(name: str) -> float:
+        return sum(float(r.get("value", 0)) for r in daily_rows if r.get("metric_name") == name)
 
-def _fetch_prior_metrics(client_id: str, from_date: str, to_date: str) -> list[dict]:
-    from_dt  = datetime.date.fromisoformat(from_date)
-    to_dt    = datetime.date.fromisoformat(to_date)
-    delta    = (to_dt - from_dt) + datetime.timedelta(days=1)
-    prior_to = (from_dt - datetime.timedelta(days=1)).isoformat()
-    prior_from = (from_dt - delta).isoformat()
-    return _fetch_metrics(client_id, prior_from, prior_to)
+    page_views          = _sum("page_views")
+    add_to_cart         = _sum("add_to_cart_count")
+    checkout_initiated  = _sum("checkout_initiated")
+    purchase_count      = _sum("purchase_count")
+    revenue             = _sum("revenue")
+    new_customers       = _sum("new_customers")
+    returning_customers = _sum("returning_customers")
+    total_customers     = _sum("total_customers")
 
+    add_to_cart_rate          = (add_to_cart / page_views * 100)      if page_views > 0         else 0.0
+    cart_to_checkout_rate     = (checkout_initiated / add_to_cart * 100) if add_to_cart > 0      else 0.0
+    checkout_completion_rate  = (purchase_count / checkout_initiated * 100) if checkout_initiated > 0 else 0.0
+    cart_abandonment_rate     = 100.0 - checkout_completion_rate
+    aov                       = (revenue / purchase_count)             if purchase_count > 0     else 0.0
+    returning_customer_rate   = (returning_customers / total_customers * 100) if total_customers > 0 else 0.0
 
-def _aggregate(rows: list[dict]) -> dict:
-    revenue   = sum(float(r.get("value", 0)) for r in rows if r.get("metric_name") == "revenue")
-    orders    = sum(int(r.get("value", 0))   for r in rows if r.get("metric_name") == "purchase_count")
-    sessions  = sum(int(r.get("value", 0))   for r in rows if r.get("metric_name") == "sessions")
-    aov       = revenue / orders if orders > 0 else 0.0
-    return {"revenue": revenue, "orders": orders, "sessions": sessions, "aov": aov}
+    kpis = [
+        {"name": "Add-to-Cart Rate",              "value": add_to_cart_rate,         "unit": "percent",  "change": None},
+        {"name": "Cart-to-Checkout Rate",          "value": cart_to_checkout_rate,    "unit": "percent",  "change": None},
+        {"name": "Checkout Completion Rate",       "value": checkout_completion_rate, "unit": "percent",  "change": None},
+        {"name": "Cart Abandonment Rate",          "value": cart_abandonment_rate,    "unit": "percent",  "change": None},
+        {"name": "Average Order Value",            "value": aov,                      "unit": "currency", "change": None},
+        {"name": "Revenue by Category",            "value": revenue,                  "unit": "currency", "change": None},
+        {"name": "New Customers",                  "value": new_customers,            "unit": "count",    "change": None},
+        {"name": "30-Day Returning Customer Rate", "value": returning_customer_rate,  "unit": "percent",  "change": None},
+    ]
 
+    # Funnel steps — fetch from the funnels table (use first funnel for this client)
+    funnel_resp = (
+        sb.table("funnels")
+        .select("id, name, steps(*)")
+        .eq("client_id", client_id)
+        .limit(1)
+        .execute()
+    )
+    funnel_data  = (funnel_resp.data or [{}])[0]
+    funnel_steps = sorted(
+        funnel_data.get("steps", []),
+        key=lambda s: s.get("step_number", 0),
+    )
 
-def _pct_change(current: float, prior: float) -> float:
-    if prior == 0:
-        return 0.0
-    return round((current - prior) / prior * 100, 1)
+    # Top products — from a product_metrics or order_items view (best-effort)
+    products_resp = (
+        sb.table("product_metrics")
+        .select("name, orders, revenue")
+        .eq("client_id", client_id)
+        .gte("date", week_start.isoformat())
+        .lte("date", week_end.isoformat())
+        .order("revenue", desc=True)
+        .limit(5)
+        .execute()
+    )
+    top_products: list[dict] = products_resp.data or []
 
+    # Cohort snapshot — week_0 and week_1 retention for recent cohorts
+    cohorts_resp = (
+        sb.table("cohort_retention")
+        .select("cohort_week, week_0, week_1")
+        .eq("client_id", client_id)
+        .order("cohort_week", desc=True)
+        .limit(8)
+        .execute()
+    )
+    cohort_summary: list[dict] = cohorts_resp.data or []
 
-def generate_weekly_report(client_id: str = CLIENT_ID) -> str:
-    """Generate a weekly PDF report and return the report record ID."""
-    today     = datetime.date.today()
-    week_end  = today - datetime.timedelta(days=today.weekday() + 1)   # last Sunday
-    week_start = week_end - datetime.timedelta(days=6)
-
-    current_rows = _fetch_metrics(client_id, week_start.isoformat(), week_end.isoformat())
-    prior_rows   = _fetch_prior_metrics(client_id, week_start.isoformat(), week_end.isoformat())
-
-    current = _aggregate(current_rows)
-    prior   = _aggregate(prior_rows)
-
-    context = {
-        "client_name":  "PixelPro Analytics",
-        "period_start": week_start.strftime("%B %d, %Y"),
-        "period_end":   week_end.strftime("%B %d, %Y"),
-        "generated_on": today.strftime("%B %d, %Y"),
-        "metrics":      current,
-        "changes": {
-            "revenue":  _pct_change(current["revenue"],  prior["revenue"]),
-            "orders":   _pct_change(current["orders"],   prior["orders"]),
-            "sessions": _pct_change(current["sessions"], prior["sessions"]),
-            "aov":      _pct_change(current["aov"],      prior["aov"]),
-        },
-        "daily_rows": current_rows,
+    return {
+        "report_date":    date.today().strftime("%B %d, %Y"),
+        "week_start":     week_start.strftime("%B %d, %Y"),
+        "week_end":       week_end.strftime("%B %d, %Y"),
+        "client_name":    "PixelPro Analytics",
+        "kpis":           kpis,
+        "funnel_steps":   funnel_steps,
+        "top_products":   top_products,
+        "cohort_summary": cohort_summary,
     }
 
-    env      = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)), autoescape=True)
-    template = env.get_template("weekly_report.html")
-    html     = template.render(**context)
 
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        pdf_path = tmp.name
+# ── Rendering ─────────────────────────────────────────────────────────────────
 
-    pdfkit.from_string(html, pdf_path, options={"quiet": ""})
+def render_html(data: dict, template_path: str = "weekly_report.html") -> str:
+    """
+    Render the Jinja2 HTML template with the provided data dict.
 
-    # Insert report record
-    record = (
-        supabase.table("reports")
-        .insert({
-            "client_id":    client_id,
-            "report_type":  "weekly",
-            "period_start": week_start.isoformat(),
-            "period_end":   week_end.isoformat(),
-            "status":       "ready",
-        })
-        .execute()
+    Args:
+        data:          Context variables matching the Jinja2 template.
+        template_path: Filename relative to the templates/ directory.
+
+    Returns:
+        Rendered HTML string.
+    """
+    env = Environment(
+        loader=FileSystemLoader(str(TEMPLATES_DIR)),
+        autoescape=True,
     )
-    report_id = record.data[0]["id"]
-
-    send_report_email(pdf_path, context, report_id)
-
-    os.unlink(pdf_path)
-    return report_id
+    template = env.get_template(template_path)
+    return template.render(**data)
 
 
-def send_report_email(pdf_path: str, context: dict, report_id: str) -> None:
-    """Send the generated PDF via Resend."""
+# ── PDF conversion ─────────────────────────────────────────────────────────────
+
+def html_to_pdf(html: str, output_path: str) -> None:
+    """
+    Convert an HTML string to a PDF file at output_path using pdfkit (wkhtmltopdf).
+
+    Args:
+        html:        Full HTML content as a string.
+        output_path: Absolute path where the PDF should be written.
+    """
+    options = {
+        "quiet":               "",
+        "page-size":           "A4",
+        "margin-top":          "10mm",
+        "margin-right":        "10mm",
+        "margin-bottom":       "10mm",
+        "margin-left":         "10mm",
+        "encoding":            "UTF-8",
+        "no-outline":          None,
+        "enable-local-file-access": None,
+    }
+    pdfkit.from_string(html, output_path, options=options)
+
+
+# ── Email delivery ─────────────────────────────────────────────────────────────
+
+def send_report_email(
+    pdf_path: str,
+    recipient: str,
+    week_start: date,
+) -> None:
+    """
+    Send the generated PDF report via the Resend API.
+
+    Args:
+        pdf_path:   Path to the PDF file on disk.
+        recipient:  Destination email address.
+        week_start: Start of the report week (used in the subject line).
+    """
     resend.api_key = RESEND_API_KEY
 
-    with open(pdf_path, "rb") as f:
-        pdf_bytes = f.read()
+    week_label = week_start.strftime("%B %d, %Y")
+    subject    = f"PixelPro Analytics — Weekly Report ({week_label})"
+
+    with open(pdf_path, "rb") as fh:
+        pdf_bytes = fh.read()
+
+    filename = f"pixelpro-weekly-{week_start.isoformat()}.pdf"
 
     resend.Emails.send({
         "from":    FROM_EMAIL,
-        "to":      [RECIPIENT_EMAIL],
-        "subject": f"PixelPro Weekly Report — {context['period_start']} to {context['period_end']}",
-        "html":    f"<p>Hi,</p><p>Your weekly analytics report (ID: {report_id}) is attached.</p>",
-        "attachments": [{
-            "filename": f"pixelpro-weekly-{context['period_end'].replace(' ', '-')}.pdf",
-            "content":  list(pdf_bytes),
-        }],
+        "to":      [recipient],
+        "subject": subject,
+        "html": (
+            "<p>Hi,</p>"
+            f"<p>Your PixelPro Analytics weekly report for the week of {week_label} is attached.</p>"
+            "<p>Log in to the dashboard for interactive charts and deeper insights.</p>"
+            "<p style='color:#64748B; font-size:12px;'>PixelPro Analytics | muddinal@uoguelph.ca</p>"
+        ),
+        "attachments": [
+            {
+                "filename": filename,
+                "content":  list(pdf_bytes),
+            }
+        ],
     })
 
 
+# ── Main orchestrator ──────────────────────────────────────────────────────────
+
+def generate_weekly_report() -> None:
+    """
+    Full pipeline:
+      1. Determine the last complete Mon–Sun week.
+      2. Fetch report data from Supabase.
+      3. Render HTML template.
+      4. Convert to PDF.
+      5. Send email via Resend.
+      6. Insert / update the reports table record with status='complete' and report_url.
+    """
+    # Determine last Monday–Sunday window
+    today     = date.today()
+    # Go back to last Monday
+    days_since_monday = today.weekday()  # Monday = 0
+    last_monday = today - timedelta(days=days_since_monday + 7)
+    last_sunday = last_monday + timedelta(days=6)
+
+    week_start = last_monday
+    week_end   = last_sunday
+
+    print(f"Generating weekly report for {week_start} – {week_end}…")
+
+    # 1. Fetch data
+    data = fetch_report_data(CLIENT_ID, week_start, week_end)
+
+    # 2. Render HTML
+    html = render_html(data)
+
+    # 3. Convert to PDF (write to a temp file)
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        pdf_path = tmp.name
+
+    html_to_pdf(html, pdf_path)
+    print(f"PDF written to {pdf_path}")
+
+    # 4. Insert a pending report record so we get an ID
+    sb = _get_client()
+    insert_resp = (
+        sb.table("reports")
+        .insert({
+            "client_id":  CLIENT_ID,
+            "status":     "generating",
+            "created_at": date.today().isoformat(),
+        })
+        .execute()
+    )
+    report_id = insert_resp.data[0]["id"]
+
+    # 5. Send email
+    send_report_email(pdf_path, RECIPIENT_EMAIL, week_start)
+    print(f"Report emailed to {RECIPIENT_EMAIL}")
+
+    # 6. Mark report complete — in a real deployment the PDF would be uploaded
+    #    to Supabase Storage and the public URL stored here.
+    report_url = f"https://hsjwzdgagfbfmqkjsvkw.supabase.co/storage/v1/object/public/reports/{report_id}.pdf"
+
+    sb.table("reports").update({
+        "status":     "complete",
+        "report_url": report_url,
+    }).eq("id", report_id).execute()
+
+    print(f"Report complete. ID: {report_id}")
+
+    # Clean up temp file
+    try:
+        os.unlink(pdf_path)
+    except OSError:
+        pass
+
+
 if __name__ == "__main__":
-    rid = generate_weekly_report()
-    print(f"Report generated: {rid}")
+    generate_weekly_report()

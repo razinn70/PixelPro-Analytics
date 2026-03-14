@@ -1,44 +1,57 @@
 export interface KPIMetric {
-  label:       string
-  value:       number
-  change:      number        // percentage change vs prior period
-  trend:       'up' | 'down' | 'neutral'
-  unit:        'currency' | 'percent' | 'count'
-  description: string
+  name: string
+  value: number
+  unit: 'percent' | 'currency' | 'count'
+  change?: number
+  changeDirection?: 'up' | 'down' | 'neutral'
+}
+
+export interface DailyMetric {
+  date: string
+  metric_name: string
+  value: number
+  client_id: string
 }
 
 export interface FunnelStep {
-  step_index:       number
-  name:             string
-  sessions:         number
-  conversion_rate:  number   // rate FROM previous step (null for first step)
-  drop_off_rate:    number
+  step_number: number
+  step_name: string
+  count: number
+  conversion_rate: number
+}
+
+export interface Funnel {
+  id: string
+  name: string
+  client_id: string
+  steps: FunnelStep[]
 }
 
 export interface CohortRow {
-  cohort_week: string        // ISO week start date
-  weeks:       number[]      // retention % for weeks 0-7
-  total_users: number
-}
-
-export interface RevenueDataPoint {
-  date:    string
-  revenue: number
-  orders:  number
+  cohort_week: string
+  week_0: number
+  week_1: number
+  week_2: number
+  week_3: number
+  week_4: number
+  week_5: number
+  week_6: number
+  week_7: number
 }
 
 export interface Report {
-  id:           string
-  client_id:    string
-  report_type:  'weekly' | 'monthly'
-  period_start: string
-  period_end:   string
-  status:       'generating' | 'ready' | 'failed'
-  file_url:     string | null
-  created_at:   string
+  id: string
+  client_id: string
+  status: 'pending' | 'generating' | 'complete' | 'failed'
+  report_url?: string
+  created_at: string
 }
 
 export interface DateRange {
-  from: string   // ISO date string
-  to:   string   // ISO date string
+  from: Date
+  to: Date
 }
+
+export type ApiResponse<T> =
+  | { data: T; error: null }
+  | { data: null; error: string }

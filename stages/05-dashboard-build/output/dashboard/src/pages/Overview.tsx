@@ -1,44 +1,55 @@
+import { useState } from 'react'
+import { subDays } from 'date-fns'
+import { useMetrics } from '@/hooks/useMetrics'
 import KPICard from '@/components/KPICard'
 import RevenueChart from '@/components/RevenueChart'
-import FunnelChart from '@/components/FunnelChart'
-import { useMetrics } from '@/hooks/useMetrics'
-import { useFunnel } from '@/hooks/useFunnel'
+import DateRangePicker, { defaultDateRange } from '@/components/DateRangePicker'
 import type { DateRange } from '@/types'
 
-interface Props { dateRange: DateRange }
+const CLIENT_ID = import.meta.env.VITE_CLIENT_ID as string
 
-export default function Overview({ dateRange }: Props) {
-  const { kpis, revenueSeries, loading: metricsLoading, error: metricsError } = useMetrics(dateRange)
-  const { steps, loading: funnelLoading, error: funnelError } = useFunnel(dateRange)
+export default function Overview() {
+  const [dateRange, setDateRange] = useState<DateRange>(defaultDateRange)
+
+  const { kpis, dailyData, loading, error } = useMetrics(CLIENT_ID, dateRange)
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-text-primary">Overview</h1>
+      {/* Header row */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <h1 className="text-2xl font-bold text-text-primary">Overview</h1>
+        <DateRangePicker value={dateRange} onChange={setDateRange} />
+      </div>
 
-      {metricsError && (
-        <p className="text-danger text-sm">Failed to load metrics: {metricsError}</p>
+      {/* Error banner */}
+      {error && (
+        <div className="bg-danger/10 border border-danger/30 rounded-lg px-4 py-3 text-danger text-sm">
+          Failed to load metrics: {error}
+        </div>
       )}
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-        {metricsLoading
-          ? Array.from({ length: 6 }, (_, i) => (
-              <div key={i} className="bg-surface rounded-xl p-5 border border-border animate-pulse h-28" />
-            ))
-          : kpis.map(kpi => <KPICard key={kpi.label} {...kpi} />)
-        }
-      </div>
+      {/* KPI grid — 8 cards */}
+      {loading ? (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {Array.from({ length: 8 }, (_, i) => (
+            <div
+              key={i}
+              className="bg-surface rounded-xl p-6 border border-border animate-pulse h-32"
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {kpis.map(kpi => (
+            <KPICard key={kpi.name} metric={kpi} />
+          ))}
+        </div>
+      )}
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {revenueSeries.length > 0 && <RevenueChart data={revenueSeries} />}
-        {funnelError
-          ? <p className="text-danger text-sm">Failed to load funnel: {funnelError}</p>
-          : !funnelLoading && steps.length > 0
-            ? <FunnelChart steps={steps} />
-            : null
-        }
-      </div>
+      {/* Revenue trend chart */}
+      {!loading && dailyData.length > 0 && (
+        <RevenueChart data={dailyData} />
+      )}
     </div>
   )
 }

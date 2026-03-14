@@ -53,14 +53,23 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res) => {
   }
 
   const steps = (funnel.steps as Array<{ index: number; name: string; event: string }>).map(step => ({
-    ...step,
-    count:           stepCounts[step.index] ?? 0,
+    step_number: step.index + 1,
+    step_name: step.name,
+    count: stepCounts[step.index] ?? 0,
     conversion_rate: step.index === 0
       ? 100
       : stepCounts[0] ? Math.round((stepCounts[step.index] ?? 0) / stepCounts[0] * 100) : 0,
   }))
 
-  res.json({ data: { funnel, steps }, meta: { request_id: req.requestId, timestamp: new Date().toISOString() } })
+  res.json({
+    data: {
+      id: funnel.id,
+      name: funnel.name,
+      client_id: funnel.client_id,
+      steps,
+    },
+    meta: { request_id: req.requestId, timestamp: new Date().toISOString() },
+  })
 })
 
 export default router

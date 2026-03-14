@@ -36,7 +36,32 @@ router.get('/', authenticate, authorizeClient, async (req: AuthenticatedRequest,
     return
   }
 
-  res.json({ data, meta: { request_id: req.requestId, timestamp: new Date().toISOString() } })
+  const rowsByCohort = new Map<string, Record<string, number | string>>()
+
+  for (const row of data ?? []) {
+    const cohortWeek = row.dimension?.cohort_week as string | undefined
+    const retentionWeek = row.dimension?.retention_week as number | undefined
+
+    if (!cohortWeek || retentionWeek === undefined || retentionWeek < 0 || retentionWeek >= weeks) {
+      continue
+    }
+
+    const existing = rowsByCohort.get(cohortWeek) ?? { cohort_week: cohortWeek }
+    existing[`week_${retentionWeek}`] = Number(row.metric_value)
+    rowsByCohort.set(cohortWeek, existing)
+  }
+
+  const normalized = Array.from(rowsByCohort.values())
+    .map(row => {
+      const completeRow: Record<string, number | string> = { cohort_week: row.cohort_week }
+      for (let i = 0; i < weeks; i += 1) {
+        completeRow[`week_${i}`] = Number(row[`week_${i}`] ?? 0)
+      }
+      return completeRow
+    })
+    .sort((a, b) => String(a.cohort_week).localeCompare(String(b.cohort_week)))
+
+  res.json({ data: normalized, meta: { request_id: req.requestId, timestamp: new Date().toISOString() } })
 })
 
 export default router

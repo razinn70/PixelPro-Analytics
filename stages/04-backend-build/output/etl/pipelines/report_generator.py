@@ -14,6 +14,8 @@ load_dotenv()
 
 supabase = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_SERVICE_KEY'])
 resend.api_key = os.environ.get('RESEND_API_KEY', '')
+CLIENT_ID = os.environ.get('CLIENT_ID')
+RECIPIENT_EMAIL = os.environ.get('RECIPIENT_EMAIL', '')
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), '..', 'templates')
 env = Environment(loader=FileSystemLoader(TEMPLATES_DIR))
@@ -79,12 +81,17 @@ def send_report_email(client: dict, pdf_path: str) -> None:
         print("RESEND_API_KEY not set — skipping email delivery")
         return
 
+    recipient = RECIPIENT_EMAIL or client.get('contact_email', '')
+    if not recipient:
+        print("No recipient email configured â€” skipping email delivery")
+        return
+
     with open(pdf_path, 'rb') as f:
         pdf_bytes = f.read()
 
     resend.Emails.send({
         'from':    'reports@pixelpro.ca',
-        'to':      client.get('contact_email', ''),
+        'to':      recipient,
         'subject': f"Your Weekly Analytics Report — {client['name']}",
         'html':    f"<p>Hi {client['name']},</p><p>Your weekly analytics report is attached.</p><p>— PixelPro Analytics</p>",
         'attachments': [{
@@ -95,7 +102,11 @@ def send_report_email(client: dict, pdf_path: str) -> None:
 
 
 if __name__ == '__main__':
-    clients = supabase.table('clients').select('*').eq('active', True).execute()
+    query = supabase.table('clients').select('*').eq('active', True)
+    if CLIENT_ID:
+        query = query.eq('id', CLIENT_ID)
+
+    clients = query.execute()
     for client in clients.data:
         pdf = generate_weekly_report(client['id'])
         send_report_email(client, pdf)
