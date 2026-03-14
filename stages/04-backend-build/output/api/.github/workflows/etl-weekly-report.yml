@@ -1,0 +1,24 @@
+name: ETL — Weekly Report
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'   # 8am UTC Monday = 4am EST Monday
+  workflow_dispatch:
+
+jobs:
+  weekly-report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - name: Install wkhtmltopdf (for pdfkit)
+        run: sudo apt-get install -y wkhtmltopdf
+      - name: Install Python dependencies
+        run: pip install -r stages/04-backend-build/output/etl/requirements.txt
+      - name: Generate weekly reports for all active clients
+        run: python stages/04-backend-build/output/etl/pipelines/report_generator.py
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          RESEND_API_KEY:       ${{ secrets.RESEND_API_KEY }}

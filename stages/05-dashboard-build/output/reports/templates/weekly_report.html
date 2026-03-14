@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>PixelPro Analytics — Weekly Report</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #fff; color: #1a1a2e; font-size: 13px; line-height: 1.6; }
+    .page  { max-width: 800px; margin: 0 auto; padding: 40px; }
+    .header { border-bottom: 3px solid #4A90D9; padding-bottom: 20px; margin-bottom: 32px; }
+    .logo  { font-size: 22px; font-weight: 700; color: #4A90D9; }
+    .subtitle { color: #64748B; font-size: 12px; margin-top: 4px; }
+    h2   { font-size: 15px; font-weight: 600; color: #0F172A; margin: 28px 0 12px; border-left: 3px solid #4A90D9; padding-left: 10px; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .kpi-card { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 14px; }
+    .kpi-label { font-size: 11px; color: #64748B; margin-bottom: 4px; }
+    .kpi-value { font-size: 20px; font-weight: 700; color: #0F172A; }
+    .kpi-change { font-size: 11px; margin-top: 4px; }
+    .up   { color: #22C55E; }
+    .down { color: #EF4444; }
+    .flat { color: #94A3B8; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { background: #F1F5F9; text-align: left; padding: 8px 10px; color: #475569; font-weight: 600; border: 1px solid #E2E8F0; }
+    td { padding: 7px 10px; border: 1px solid #E2E8F0; color: #334155; }
+    tr:nth-child(even) td { background: #F8FAFC; }
+    .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #E2E8F0; font-size: 11px; color: #94A3B8; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="header">
+      <div class="logo">PixelPro Analytics</div>
+      <div class="subtitle">Weekly Performance Report &nbsp;·&nbsp; {{ period_start }} – {{ period_end }}</div>
+      <div class="subtitle">Generated {{ generated_on }}</div>
+    </div>
+
+    <h2>Executive Summary</h2>
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Revenue</div>
+        <div class="kpi-value">${{ "%.2f"|format(metrics.revenue) }}</div>
+        <div class="kpi-change {{ 'up' if changes.revenue >= 0 else 'down' }}">
+          {{ '+' if changes.revenue >= 0 else '' }}{{ changes.revenue }}% vs prior week
+        </div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Orders</div>
+        <div class="kpi-value">{{ metrics.orders }}</div>
+        <div class="kpi-change {{ 'up' if changes.orders >= 0 else 'down' }}">
+          {{ '+' if changes.orders >= 0 else '' }}{{ changes.orders }}% vs prior week
+        </div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Sessions</div>
+        <div class="kpi-value">{{ metrics.sessions }}</div>
+        <div class="kpi-change {{ 'up' if changes.sessions >= 0 else 'down' }}">
+          {{ '+' if changes.sessions >= 0 else '' }}{{ changes.sessions }}% vs prior week
+        </div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Avg Order Value</div>
+        <div class="kpi-value">${{ "%.2f"|format(metrics.aov) }}</div>
+        <div class="kpi-change {{ 'up' if changes.aov >= 0 else 'down' }}">
+          {{ '+' if changes.aov >= 0 else '' }}{{ changes.aov }}% vs prior week
+        </div>
+      </div>
+    </div>
+
+    <h2>Daily Breakdown</h2>
+    {% set revenue_rows = daily_rows | selectattr('metric_name', 'eq', 'revenue') | list %}
+    {% if revenue_rows %}
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Metric</th>
+          <th>Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in daily_rows | sort(attribute='date') %}
+        <tr>
+          <td>{{ row.date }}</td>
+          <td>{{ row.metric_name }}</td>
+          <td>{{ row.value }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p style="color:#94A3B8; font-size:12px;">No daily data available for this period.</p>
+    {% endif %}
+
+    <h2>Recommendations</h2>
+    <ul style="padding-left:18px; color:#334155; font-size:12px; line-height:2;">
+      {% if changes.revenue < 0 %}
+      <li>Revenue declined {{ changes.revenue }}% week-over-week. Review cart abandonment rates and checkout friction.</li>
+      {% else %}
+      <li>Revenue grew {{ changes.revenue }}% week-over-week. Continue monitoring top-performing product categories.</li>
+      {% endif %}
+      {% if metrics.aov < 300 %}
+      <li>Average order value (${{ "%.2f"|format(metrics.aov) }}) is below the $300 target. Consider bundle offers or upsells at checkout.</li>
+      {% endif %}
+      <li>Review the cohort analysis dashboard for 30-day retention trends.</li>
+      <li>Ensure GA4 DebugView shows all 6 custom events firing correctly in production.</li>
+    </ul>
+
+    <div class="footer">
+      <p>PixelPro Analytics &nbsp;·&nbsp; {{ client_name }} &nbsp;·&nbsp; Confidential</p>
+      <p>This report was automatically generated. Contact support@pixelpro.ca for questions.</p>
+    </div>
+  </div>
+</body>
+</html>
